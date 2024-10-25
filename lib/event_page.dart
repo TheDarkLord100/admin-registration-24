@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert'; // For decoding JSON
-import 'dart:io'; // For handling socket exceptions
-import 'dart:async'; // For handling timeouts
+import 'dart:convert';
+import 'dart:io';
+import 'dart:async';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:csv/csv.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:app_settings/app_settings.dart';
 
 class EventPage extends StatefulWidget {
   const EventPage({super.key});
@@ -18,61 +22,45 @@ class _EventPageState extends State<EventPage> {
   @override
   void initState() {
     super.initState();
-    fetchEvents(); // Fetch events when the page is initialized
+    fetchEvents();
   }
 
-  // Function to fetch data from API
   Future<void> fetchEvents() async {
-    const url = 'https://27.123.248.68:4000/api/events';
+  const url = 'https://27.123.248.68:4000/api/events';
 
-    try {
-      // Send GET request with a timeout to avoid infinite loading
-      var client = http.Client();
-      http.Response response = await client
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 10));
+  try {
+    var client = http.Client();
+    http.Response response = await client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        // Check if the response body can be decoded as JSON
-        final decodedResponse = json.decode(response.body);
-        if (decodedResponse is Map && decodedResponse.containsKey('events')) {
-          final List fetchedEvents = decodedResponse["events"];
-          setState(() {
-            events = fetchedEvents;
-            isLoading = false;
-          });
-        } else {
-          throw Exception('Malformed response data');
-        }
+    if (response.statusCode == 200) {
+      final decodedResponse = json.decode(response.body) as Map<String, dynamic>;
+      if (decodedResponse.containsKey('events')) {
+        final List fetchedEvents = decodedResponse["events"];
+        setState(() {
+          events = fetchedEvents;
+          isLoading = false;
+        });
       } else {
-        // If response status is not OK, throw an error with the status code
-        throw HttpException('Failed to load events, status code: ${response.statusCode}');
+        throw Exception('Unexpected response format.');
       }
-    } on SocketException catch (e) {
-      // Handle network error (specific case)
-      setState(() {
-        isLoading = false;
-      });
-      print('Network error: $e');
-      _showErrorDialog('Network error. Please check your internet connection.');
-    } on TimeoutException catch (e) {
-      // Handle timeout error (specific case)
-      setState(() {
-        isLoading = false;
-      });
-      print('Timeout error: $e');
-      _showErrorDialog('Request timed out. Please try again later.');
-    } catch (e) {
-      // Handle general errors
-      setState(() {
-        isLoading = false;
-      });
-      print('Error: $e');
-      _showErrorDialog('An unexpected error occurred. Please try again.');
+    } else {
+      throw HttpException('Failed to load events, status code: ${response.statusCode}');
     }
+  } on SocketException {
+    _showErrorDialog('Network error. Please check your internet connection.');
+  } on TimeoutException {
+    _showErrorDialog('Request timed out. Please try again later.');
+  } catch (e) {
+    print("Error fetching events: $e");
+    _showErrorDialog('An unexpected error occurred. Please try again.');
+  } finally {
+    setState(() {
+      isLoading = false;
+    });
   }
+}
 
-  // Function to show error dialog
+
   void _showErrorDialog(String message) {
     showDialog(
       context: context,
@@ -100,7 +88,7 @@ class _EventPageState extends State<EventPage> {
         title: const Text('Events List'),
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator()) 
+          ? const Center(child: CircularProgressIndicator())
           : events.isEmpty
               ? const Center(child: Text('No events available'))
               : ListView.builder(
@@ -109,14 +97,14 @@ class _EventPageState extends State<EventPage> {
                     final event = events[index];
                     return Card(
                       child: ListTile(
-                        title: Text(event['event_name'] ?? 'No name'), 
-                        subtitle: Text(event['event_id'] ?? 'No ID'),  
+                        title: Text(event['event_name'] ?? 'No name'),
+                        subtitle: Text(event['event_id'] ?? 'No ID'),
                         onTap: () {
-                          
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => EventDetailScreen(event: event),
+                              builder: (context) =>
+                                  EventDetailScreen(eventId: event['event_id']),
                             ),
                           );
                         },
@@ -128,36 +116,156 @@ class _EventPageState extends State<EventPage> {
   }
 }
 
-class EventDetailScreen extends StatelessWidget {
-  final dynamic event; 
+class EventDetailScreen extends StatefulWidget {
+  final String eventId;
 
-  const EventDetailScreen({Key? key, required this.event}) : super(key: key);
+  const EventDetailScreen({super.key, required this.eventId});
+
+  @override
+  _EventDetailScreenState createState() => _EventDetailScreenState();
+}
+
+class _EventDetailScreenState extends State<EventDetailScreen> {
+  Map<String, dynamic> eventDetails = {};
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchEventDetails();
+  }
+
+  Future<void> fetchEventDetails() async {
+  final url = 'https://27.123.248.68:4000/api/register/getRegistrations/${widget.eventId}';
+
+  try {
+    var client = http.Client();
+    http.Response response = await client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final decodedResponse = json.decode(response.body) as Map<String, dynamic>;
+      if (decodedResponse.containsKey('registrations')) {
+        setState(() {
+          eventDetails = decodedResponse;
+          isLoading = false;
+        });
+      } else {
+        throw Exception('Unexpected JSON format.');
+      }
+    } else {
+      throw HttpException('Failed to load event details, status code: ${response.statusCode}');
+    }
+  } on SocketException {
+    _showErrorDialog('Network error. Please check your internet connection.');
+  } on TimeoutException {
+    _showErrorDialog('Request timed out. Please try again later.');
+  } catch (e) {
+    print("Error fetching event details: $e");
+    _showErrorDialog('An unexpected error occurred. Please try again.');
+  } finally {
+    setState(() {
+      isLoading = false;
+    });
+  }
+}
+
+
+  Future<void> _generateCSV() async {
+    if (await _checkPermissions()) {
+      List<List<dynamic>> rows = [];
+      rows.add(['Team Name', 'Payment Status', 'Member Name']);
+
+      final registrations = eventDetails['registrations'] as List;
+      for (var registration in registrations) {
+        String teamName = registration['teamName'] ?? 'N/A';
+        String paymentStatus = registration['payment']['paid'] ? 'Paid' : 'Not Paid';
+        List<dynamic> memberNames = registration['members'].map((member) => member['name']).toList();
+
+        for (var name in memberNames) {
+          rows.add([teamName, paymentStatus, name]);
+        }
+      }
+
+      String csv = const ListToCsvConverter().convert(rows);
+      final directory = await getExternalStorageDirectory();
+      final path = '${directory!.path}/event_registrations.csv';
+      final File file = File(path);
+
+      await file.writeAsString(csv);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('CSV file generated successfully: $path')),
+      );
+    }
+  }
+
+  Future<bool> _checkPermissions() async {
+    var status = await Permission.storage.status;
+    if (!status.isGranted) {
+      status = await Permission.storage.request();
+      if (status.isDenied) {
+        _showErrorDialog('Storage permission is denied. Please enable it in settings.');
+        AppSettings.openAppSettings(); // Open app settings if denied
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Error'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('OK'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(event['event_name'] ?? 'Event Details'),
+        title: Text(eventDetails['event_name'] ?? 'Event Details'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Event ID: ${event['event_id'] ?? 'N/A'}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Event ID: ${eventDetails['event_id'] ?? 'N/A'}',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Event Name: ${eventDetails['event_name'] ?? 'N/A'}',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: _generateCSV,
+                    child: const Text('Print Candidates'),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Registration Details: ${eventDetails['registrations'] ?? 'No registrations available'}',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Event Name: ${event['event_name'] ?? 'N/A'}',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-           
-          ],
-        ),
-      ),
     );
   }
 }
