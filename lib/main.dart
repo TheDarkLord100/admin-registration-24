@@ -14,7 +14,7 @@ class MyHttpOverrides extends HttpOverrides {
 
 void main() {
   // Apply the SSL override globally
-  HttpOverrides.global = MyHttpOverrides();
+  // HttpOverrides.global = MyHttpOverrides();
   
   runApp(const MyApp());
 }
