@@ -1,21 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:csv/csv.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:app_settings/app_settings.dart';
+import 'package:path/path.dart' as path;
 import 'RegistrationModel.dart';
 
 class EventDetailScreen extends StatefulWidget {
   final String eventId;
   final String eventName;
 
-  const EventDetailScreen(
-      {super.key, required this.eventId, required this.eventName});
+  const EventDetailScreen({
+    Key? key,
+    required this.eventId,
+    required this.eventName,
+  }) : super(key: key);
 
   @override
   _EventDetailScreenState createState() => _EventDetailScreenState();
@@ -23,7 +25,10 @@ class EventDetailScreen extends StatefulWidget {
 
 class _EventDetailScreenState extends State<EventDetailScreen> {
   List<RegistrationModel> eventRegistrations = [];
+  List<RegistrationModel> filteredRegistrations = [];
   bool isLoading = true;
+  bool showOnlyDIT = false;
+  bool showOnlyPaid = false;
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           eventRegistrations = decodedResponse
               .map((json) => RegistrationModel.fromJson(json))
               .toList();
+          filteredRegistrations = List.from(eventRegistrations);
         });
       } else if (response.statusCode == 404) {
         _showErrorDialog('No registrations found for this event.');
@@ -66,13 +72,93 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     }
   }
 
+  void _applyFilters() {
+    setState(() {
+      filteredRegistrations = eventRegistrations.where((registration) {
+        final isDITMatch =
+            !showOnlyDIT || registration.college == 'DIT University';
+        final isPaidMatch = !showOnlyPaid || registration.payment.paid;
+        return isDITMatch && isPaidMatch;
+      }).toList();
+    });
+  }
+
+  Future<void> _generateCSV() async {
+    if (await _checkPermissions()) {
+      List<List<dynamic>> rows = [];
+
+      List<String> headers = [
+        'Team Name',
+        'Email',
+        'College',
+        'Payment Status',
+        'Amount'
+      ];
+
+      int maxMembers = filteredRegistrations
+          .map((json) => json.members.length)
+          .fold(0, (prev, curr) => curr > prev ? curr : prev);
+
+      for (int i = 1; i <= maxMembers; i++) {
+        headers.addAll([
+          'Member $i Name',
+          'Member $i College ID',
+          'Member $i Personal ID',
+        ]);
+      }
+
+      rows.add(headers);
+
+      for (var regModel in filteredRegistrations) {
+        List<dynamic> row = [
+          regModel.teamName,
+          regModel.email,
+          regModel.college,
+          regModel.payment.paid ? 'Paid' : 'Not Paid',
+          regModel.payment.amount,
+        ];
+
+        for (int i = 0; i < maxMembers; i++) {
+          if (i < regModel.members.length) {
+            Member member = regModel.members[i];
+            row.addAll([
+              member.name,
+              member.collegeId,
+              member.personalId,
+            ]);
+          } else {
+            row.addAll(['', '', '']);
+          }
+        }
+
+        rows.add(row);
+      }
+
+      String csv = const ListToCsvConverter().convert(rows);
+      final downloadsDirectory = Directory('/storage/emulated/0/Download');
+      if (!downloadsDirectory.existsSync()) {
+        downloadsDirectory.createSync(recursive: true);
+      }
+
+      final fileName =
+          '${widget.eventName.replaceAll(" ", "_")}_registrations.csv';
+      final filePath = path.join(downloadsDirectory.path, fileName);
+      final File file = File(filePath);
+
+      await file.writeAsString(csv);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('CSV file generated successfully at: $filePath')),
+      );
+    }
+  }
+
   Future<bool> _checkPermissions() async {
     var status = await Permission.storage.status;
     if (status.isGranted) {
       return true;
     }
     status = await Permission.storage.request();
-    print(status);
     if (status.isGranted) {
       return true;
     } else if (status.isPermanentlyDenied) {
@@ -87,81 +173,6 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       AppSettings.openAppSettings();
     }
     return false;
-  }
-
-  Future<void> _generateCSV() async {
-    // Check for permissions before proceeding
-    if (await _checkPermissions()) {
-      List<List<dynamic>> rows = [];
-
-      // Initial headers for static fields
-      List<String> headers = [
-        'Team Name',
-        'Email',
-        'College',
-        'Payment Status',
-        'Amount'
-      ];
-
-      // Determine max member count across all registrations
-      int maxMembers = eventRegistrations
-          .map((json) => json.members.length)
-          .fold(0, (prev, curr) => curr > prev ? curr : prev);
-
-      // Add dynamic headers for each member based on maxMembers
-      for (int i = 1; i <= maxMembers; i++) {
-        headers.addAll([
-          'Member $i Name',
-          'Member $i College ID',
-          'Member $i Personal ID',
-        ]);
-      }
-
-      // Add headers to rows
-      rows.add(headers);
-
-      // Populate rows with registration data
-      for (var regModel in eventRegistrations) {
-
-        // Add base registration details
-        List<dynamic> row = [
-          regModel.teamName,
-          regModel.email,
-          regModel.college,
-          regModel.payment.paid ? 'Paid' : 'Not Paid',
-          regModel.payment.amount,
-        ];
-
-        // Add each member's details to the row
-        for (int i = 0; i < maxMembers; i++) {
-          if (i < regModel.members.length) {
-            Member member = regModel.members[i];
-            row.addAll([
-              member.name,
-              member.collegeId,
-              member.personalId,
-            ]);
-          } else {
-            // Fill in empty values for missing members
-            row.addAll(['', '', '']);
-          }
-        }
-
-        // Add the populated row to rows list
-        rows.add(row);
-      }
-
-      // Convert rows to CSV format
-      String csv = const ListToCsvConverter().convert(rows);
-      final directory = await getExternalStorageDirectory();
-      final path = '${directory!.path}/event_registrations.csv';
-      final File file = File(path);
-
-      await file.writeAsString(csv);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('CSV file generated successfully at: $path')),
-      );
-    }
   }
 
   void _showErrorDialog(String message) {
@@ -184,6 +195,15 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     );
   }
 
+  double _calculateTotalAmount() {
+    return filteredRegistrations
+        .where((registration) => registration.payment.paid)
+        .fold(0.0, (sum, registration) {
+      double amount = double.tryParse(registration.payment.amount) ?? 0.0;
+      return sum + amount;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -195,7 +215,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
               : Padding(
                   padding: const EdgeInsets.only(right: 20),
                   child: Text(
-                    eventRegistrations.length.toString(),
+                    filteredRegistrations.length.toString(),
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 16),
                   ),
@@ -204,7 +224,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : eventRegistrations.isEmpty
+          : filteredRegistrations.isEmpty
               ? const Center(
                   child: Text('No registrations found for this event.'))
               : SingleChildScrollView(
@@ -214,21 +234,62 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 8),
-                        ElevatedButton(
-                          onPressed: _generateCSV, //_generateCSV,
-                          child: const Text('Print Candidates'),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              ElevatedButton(
+                                onPressed: _generateCSV,
+                                child: const Text('Print Candidates'),
+                              ),
+                              const SizedBox(width: 2),
+                              FilterChip(
+                                label: const Text("DIT University"),
+                                selected: showOnlyDIT,
+                                onSelected: (value) {
+                                  setState(() {
+                                    showOnlyDIT = value;
+                                    _applyFilters();
+                                  });
+                                },
+                              ),
+                              const SizedBox(width: 2),
+                              FilterChip(
+                                label: const Text("Paid Only"),
+                                selected: showOnlyPaid,
+                                onSelected: (value) {
+                                  setState(() {
+                                    showOnlyPaid = value;
+                                    _applyFilters();
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 8),
+                        if (showOnlyPaid)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Text(
+                              'Total Amount: Rs ${_calculateTotalAmount().toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
                         ListView.builder(
                           shrinkWrap: true,
                           physics: const ClampingScrollPhysics(),
-                          itemCount: eventRegistrations.length,
+                          itemCount: filteredRegistrations.length,
                           itemBuilder: (context, index) {
                             return Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 16),
                               child: DetailsCard(
-                                  details: eventRegistrations[index]),
+                                  details: filteredRegistrations[index]),
                             );
                           },
                         ),
@@ -270,10 +331,18 @@ class MemberList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: members
-          .map((member) => Text(
-              'Member Name: ${member.name} - College ID: ${member.collegeId}'))
-          .toList(),
+      children: List.generate(members.length, (index) {
+        Member member = members[index];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Member ${index + 1}:'),
+            Text('  Name: ${member.name}'),
+            Text('  College ID: ${member.collegeId}'),
+            Text('  Personal ID: ${member.personalId}'),
+          ],
+        );
+      }),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'package:youthopia_admin_app/event_detail.dart';
+import 'package:youthopia_admin_app/payment_screen.dart'; // Import the PaymentScreen here
 
 class EventPage extends StatefulWidget {
   const EventPage({super.key});
@@ -38,10 +39,12 @@ class _EventPageState extends State<EventPage> {
 
     try {
       var client = http.Client();
-      http.Response response = await client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      http.Response response =
+          await client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        final decodedResponse = json.decode(response.body) as Map<String, dynamic>;
+        final decodedResponse =
+            json.decode(response.body) as Map<String, dynamic>;
         if (decodedResponse.containsKey('events')) {
           final List fetchedEvents = decodedResponse["events"];
           setState(() {
@@ -53,7 +56,8 @@ class _EventPageState extends State<EventPage> {
           throw Exception('Unexpected response format.');
         }
       } else {
-        throw HttpException('Failed to load events, status code: ${response.statusCode}');
+        throw HttpException(
+            'Failed to load events, status code: ${response.statusCode}');
       }
     } on SocketException {
       _showErrorDialog('Network error. Please check your internet connection.');
@@ -115,14 +119,14 @@ class _EventPageState extends State<EventPage> {
       appBar: AppBar(
         title: isSearching
             ? TextField(
-          controller: searchController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Search by event name',
-            border: InputBorder.none,
-            prefixIcon: Icon(Icons.search),
-          ),
-        )
+                controller: searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search by event name',
+                  border: InputBorder.none,
+                  prefixIcon: Icon(Icons.search),
+                ),
+              )
             : const Text('Events List'),
         actions: [
           IconButton(
@@ -134,30 +138,42 @@ class _EventPageState extends State<EventPage> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : filteredEvents.isEmpty
-          ? const Center(child: Text('No events available'))
-          : ListView.builder(
-        itemCount: filteredEvents.length,
-        itemBuilder: (context, index) {
-          final event = filteredEvents[index];
-          return Card(
-            child: ListTile(
-              title: Text(event['event_name'] ?? 'No name'),
-              subtitle: Text(event['event_id'] ?? 'No ID'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => EventDetailScreen(
-                      eventId: event['event_id'],
-                      eventName: event['event_name'],
-                    ),
-                  ),
-                );
-              },
+              ? const Center(child: Text('No events available'))
+              : ListView.builder(
+                  itemCount: filteredEvents.length,
+                  itemBuilder: (context, index) {
+                    final event = filteredEvents[index];
+                    return Card(
+                      child: ListTile(
+                        title: Text(event['event_name'] ?? 'No name'),
+                        subtitle: Text(event['event_id'] ?? 'No ID'),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EventDetailScreen(
+                                eventId: event['event_id'],
+                                eventName: event['event_name'],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const PaymentScreen(),
             ),
           );
         },
+        child: const Icon(Icons.payment),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 }
