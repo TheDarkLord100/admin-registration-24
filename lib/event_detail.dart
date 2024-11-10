@@ -314,6 +314,7 @@ class DetailsCard extends StatelessWidget {
         Text('Registration ID: ${details.regID}'),
         Text('Team Name: ${details.teamName}'),
         Text('College: ${details.college}'),
+        Text('Email: ${details.email}'),
         Text('Member Count: ${details.members.length}'),
         MemberList(members: details.members),
         Text('Payment Status: ${details.payment.paid ? 'Paid' : 'Not Paid'}'),
